@@ -1,12 +1,17 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import *
+from tkinter import PhotoImage
+from PIL import Image, ImageTk
 import chess
 import chess.engine
 
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
 PIECES = {'R':'♖','N':'♘','B':'♗','Q':'♕','K':'♔','P':'♙','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚','p':'♟'}
+
+root = tk.Tk()
+root.geometry("600x750")
 
 class DylanChessProgram:
     def __init__(self, root):
@@ -24,23 +29,26 @@ class DylanChessProgram:
         self.create_menu_ui()
 
     def clear_screen(self):
-        for w in self.container.winfo_children(): w.destroy()
+        for window in self.container.winfo_children(): window.destroy()
 
     def create_menu_ui(self):
-        self.clear_screen
+        self.clear_screen()
         self.review_index = -1
         frame = tk.Frame(self.container, bg="#2c3e50")
         frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        logo_image = Image.open(r"G:\My Drive\Level 3 NCEA\L3DTSD\Chess-program\chess learning website assets\Logo.png") 
+        logo_image = logo_image.resize((325, 175))
+        self.logo_tk = ImageTk.PhotoImage(logo_image) # Stored to self to prevent garbage collection
+        
+        logo_label = tk.Label(frame, image=self.logo_tk, bg="#2c3e50")
+        logo_label.pack(pady=10)
+
 
         tk.Label(frame, text="Dylan's Chess", fg="white", 
                  bg="#2c3e50", font=("Courier", 32, "bold")).pack(pady=10)
         
         tk.Button(frame, text="Play Chess", width=25, command=lambda: self.start_game(None)).pack(pady=10)
-
-        if self.history:
-            tk.Button(frame, text="Review Last Game", 
-                          width=25, bg="#3498db", fg="white", 
-                          command=self.run_review_analysis).pack(pady=20)
 
     def start_game(self, level):
         self.ai_level = level
@@ -79,8 +87,6 @@ class DylanChessProgram:
                         text=PIECES[piece_position.symbol()], font="Arial")
 
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    root.geometry("600x750")
-    app = DylanChessProgram(root)
-    root.mainloop()
+
+app = DylanChessProgram(root)
+root.mainloop()
