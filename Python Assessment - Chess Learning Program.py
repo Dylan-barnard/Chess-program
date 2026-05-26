@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox
 from tkinter import *
 from tkinter import PhotoImage
 from PIL import Image, ImageTk
@@ -9,6 +10,7 @@ import chess.engine
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
 PIECES = {'R':'♖','N':'♘','B':'♗','Q':'♕','K':'♔','P':'♙','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚','p':'♟'}
+STOCKFISH_PATH = "G:\\My Drive\\Level 3 NCEA\\L3DTSD\\stockfish-windows-x86-64-avx2\\stockfish\\stockfish-windows-x86-64-avx2.exe"
 
 root = tk.Tk()
 root.geometry("600x750")
@@ -17,6 +19,9 @@ class DylanChessProgram:
     def __init__(self, root):
         self.root = root
         self.root.title("Dylan's Chess: Training & Review")
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self.board = chess.Board()
         self.history = []  # Stores (FEN, Move)
         self.review_analysis = [] # Stores analysis data
@@ -31,6 +36,14 @@ class DylanChessProgram:
     def clear_screen(self):
         for window in self.container.winfo_children(): window.destroy()
 
+    def on_closing(self):
+        if messagebox.askokcancel("Exit the program",
+                              "Are you sure you want to exit?"):
+            self.root.destroy()
+
+
+
+
     def create_menu_ui(self):
         self.clear_screen()
         self.review_index = -1
@@ -44,11 +57,12 @@ class DylanChessProgram:
         logo_label = tk.Label(frame, image=self.logo_tk, bg="#2c3e50")
         logo_label.pack(pady=10)
 
-
         tk.Label(frame, text="Dylan's Chess", fg="white", 
                  bg="#2c3e50", font=("Courier", 32, "bold")).pack(pady=10)
         
         tk.Button(frame, text="Play Chess", width=25, command=lambda: self.start_game(None)).pack(pady=10)
+        exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
+        exit_button.pack(pady=10)
 
     def start_game(self, level):
         self.ai_level = level
@@ -60,6 +74,8 @@ class DylanChessProgram:
     def chess_board_ui(self):
         self.canvas = tk.Canvas(self.container, width=480, height=480, highlightthickness=0)
         self.canvas.pack(pady=10)
+
+        self.canvas.bind("<Button-1>", self.handle_click)
 
         self.draw_board()
 
@@ -84,9 +100,62 @@ class DylanChessProgram:
                     piece_position = current_board.piece_at(chess_square)
                     if piece_position:
                         self.canvas.create_text(x1+30, y1+30, 
-                        text=PIECES[piece_position.symbol()], font="Arial")
+                        text=PIECES[piece_position.symbol()], font=("Arial", 36))
+                        
+    def handle_click(self, event):
+        column, row = event.x//60, 7-(event.y//60)
+        square = chess.square(column, row)
 
+        if self.selected_square is None:
+            piece = self.board.piece_at(square)
+            if piece and piece.color == self.board.turn: 
+                self.selected_square = square
+                self.draw_board()
+        else:
+            move = chess.Move(self.selected_square, square)
 
+                #Handling promotion
+            promotion = chess.Move(self.selected_square, square, chess.QUEEN)
+
+            if move in self.board.legal_moves:
+                    final_move = move
+            elif promotion in self.board.legal_moves:
+                    final_move = promotion
+            else:
+                    final_move = None
+
+            if final_move:
+                    self.history.append((self.board.fen(), final_move))
+                    self.board.push(final_move)
+                    self.selected_square = None
+                    self.draw_board()
+
+                    if self.ai_level is not None and not self.board.is_game_over():
+                        self.root.after(500, self.make_ai_move)
+
+                    else:
+                        self.check_end()
+                        
+            else:
+                self.selected_square = None
+                self.draw_board()
+
+    def make_ai_move(self):
+        try:
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                engine.configure({"Skill Level": self.ai_level})
+                engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
+
+                self.history.append((self.board.fen(), engine_move.move))
+                self.board.push(engine_move.move)
+                self.draw_board()
+                self.check_end()
+        except: pass
+
+    def check_end(self):
+        if self.board.is_game_over():
+            messagebox.showinfo("Game Over", f"Result: {self.board.result()}")
+            self.create_menu_ui()
 
 app = DylanChessProgram(root)
 root.mainloop()
