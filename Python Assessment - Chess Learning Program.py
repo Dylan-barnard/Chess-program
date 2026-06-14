@@ -6,6 +6,7 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import chess
 import chess.engine
+import random
 
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
@@ -71,13 +72,24 @@ class DylanChessProgram:
         tk.Label(frame, text=f"Your Rating: {round(self.player_elo)} Elo", fg="#1abc9c", bg="#2c3e50", 
                  font=("Arial", 16, "bold")).pack(pady=10)
         
-        tk.Button(frame, text="Play Chess", width=25, command=lambda: self.start_game(0)).pack(pady=10)
+        tk.Button(frame, text="Play Chess", width=25, command=lambda: self.open_mode_selection()).pack(pady=10)
         exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
         exit_button.pack(pady=10)
 
+    def open_mode_selection(self):
+        self.game_settings = tk.Toplevel(root)
+        self.game_settings.title("Select your Game specifications")
+        self.game_settings.geometry("600x750")
+        self.game_settings.config(bg="#2c3e50")
+
+        tk.Button(self.game_settings, text="Player vs AI Level 1(200 Elo)", width=25, command=lambda: self.start_game(0)).pack(pady=10)
+        tk.Button(self.game_settings, text="Player vs AI Level 2(600 Elo)", width=25, command=lambda: self.start_game(5)).pack(pady=10)
+        tk.Button(self.game_settings, text="Player vs AI Level 3(1000 Elo)", width=25, command=lambda: self.start_game(10)).pack(pady=10)
+        
     def start_game(self, level):
-        self.ai_level = level
         self.board = chess.Board()
+        self.game_settings.destroy()
+        self.ai_level = level
         self.history = []
         self.clear_screen()
         self.chess_board_ui()
@@ -155,27 +167,68 @@ class DylanChessProgram:
 
     def make_ai_move(self):
         try:
-            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                target_elo = max(1350, Bot_ratings[self.ai_level])
-                engine.configure({
-                    "UCI_LimitStrength": True, 
-                    "UCI_Elo": target_elo, 
-                    "Skill Level": self.ai_level
-                })
+            # STEP 1: If playing the 200 Elo bot, implement Martin's handicap logic from chess.com
+            if self.ai_level == 0:
+                legal_moves = list(self.board.legal_moves)
+            
+                # Spin a roulette wheel (0.0 to 1.0) to decide how the 200 elo handles this turn
+                roll = random.random()
 
-                if self.ai_level == 0:
-                    limit = chess.engine.Limit(depth=1, time=0.05)
-                else:
-                    limit = chess.engine.Limit(time=0.1)
-                engine_move = engine.play(self.board, limit)
+                # 35% Chance: Play a completely random move (Absolute Blunder)
+                if roll < 0.35:
+                    final_move = random.choice(legal_moves)
+                    self.execute_bot_move(final_move)
+                    return
 
-                if engine_move.move:
-                    self.history.append((self.board.fen(), engine_move.move))
-                    self.board.push(engine_move.move)
-                    self.draw_board()
-                    self.check_end()
+                # 65% Chance: Use Stockfish, but degrade its choice
+                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                # Ask Stockfish to evaluate the top 5 multi-PV variants at an ultra-low depth
+                    analysis = engine.analyse(self.board, chess.engine.Limit(depth=2), multipv=5)
+                
+                    # Extract the moves found by the engine
+                    ranked_moves = [info.get("pv")[0] for info in analysis if info.get("pv")]
+
+                    if ranked_moves:
+                    # 40% Chance: 200 elo bot plays a mediocre, suboptimal move (3rd to 5th choice)
+                        if roll < 0.75 and len(ranked_moves) >= 3:
+                            final_move = random.choice(ranked_moves[2:])
+                    # 25% Chance: 200 elo bot spots a decent move (1st or 2nd choice)
+                        else:
+                            final_move = random.choice(ranked_moves[:2])
+                        
+                            self.execute_bot_move(final_move)
+                            return
+
+            elif self.ai_level == 5:
+                legal_moves = list(self.board.legal_moves)
+
+                if random.random() < 0.15:
+                    self.execute_bot_move(random.choice(legal_moves))
+                    return
+                
+                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                    engine.configure({"Skill Level": 0})
+                    engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
+                    self.execute_bot_move(engine_move.move)
+                    return
+
+            else:
+                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                    engine.configure({"Skill Level": 0})
+                    engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
+                    self.execute_bot_move(engine_move.move)
+
         except Exception as e:
-            print(f"Stockfish Error: {e}")
+            print(f"Engine Error: {e}")
+            # Emergency backup: Make a random legal move if the engine fails
+            if not self.board.is_game_over():
+                self.execute_bot_move(random.choice(list(self.board.legal_moves)))
+
+    def execute_bot_move(self, move):
+            self.history.append((self.board.fen(), move))
+            self.board.push(move)
+            self.draw_board()
+            self.check_end()
 
     def check_end(self):
         if self.board.is_game_over():
