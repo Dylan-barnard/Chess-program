@@ -73,6 +73,9 @@ class DylanChessProgram:
                  font=("Arial", 16, "bold")).pack(pady=10)
         
         tk.Button(frame, text="Play Chess", width=25, command=lambda: self.open_mode_selection()).pack(pady=10)
+
+        tk.Button(frame, text="Review Last Game", width=25, command=lambda: self.run_game_review()).pack(pady=10)
+
         exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
         exit_button.pack(pady=10)
 
@@ -192,6 +195,7 @@ class DylanChessProgram:
                     # 40% Chance: 200 elo bot plays a mediocre, suboptimal move (3rd to 5th choice)
                         if roll < 0.75 and len(ranked_moves) >= 3:
                             final_move = random.choice(ranked_moves[2:])
+                            self.execute_bot_move(final_move)
                     # 25% Chance: 200 elo bot spots a decent move (1st or 2nd choice)
                         else:
                             final_move = random.choice(ranked_moves[:2])
@@ -260,6 +264,88 @@ class DylanChessProgram:
         #change user's elo
         self.player_elo += rating_change
         return rating_change
+
+    def run_game_review(self):
+        self.clear_screen()
+        tk.Label(self.container, text="Stockfish is analysing your performance...", fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
+        self.root.update()
+
+        self.review_analysis()
+        try:
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                for fen, move in self.history:
+                    board = chess.Board(fen)
+
+                    info = engine.analyse(board, chess.engine.Limit(time=0.2))
+                    best_move = info["pv"][0]
+                    best_score = info["score"].relative.score(mate_score=10000)
+
+                    board.push(move)
+                    info_after = engine.analyse(board, chess.engine.Limit(time=0.2))
+                    actual_score = -info_after["score"].relative.score(mate_score=10000)
+
+                    loss = best_score - actual_score
+                    quality, explanation = self.get_explanation(loss, move, best_move)
+                    self.review_analysis.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Analysis Failed:{e}")
+            self.create_menu_ui()
+            return
+
+        self.review_index = 0
+        self.show_review_ui()
+
+    def show_review_ui(self):
+        self.clear_screen()
+
+        #Board
+        self.canvas = tk.Canvas(self.container, width=480, height=480, highlightthickness=0)
+        self.canvas.pack(pady=10)
+
+        #Explanation Area
+        self.exp_label = tk.Label(self.container, text="", fg="white", bg="#2c3e50", font=
+        ("Arial", 11, "italic"), wraplength=400, height=4)
+        self.exp_label.pack(fill="x", padx=20)
+
+        #General Navigation
+        nav_frame = tk.Frame(self.container, bg="#2c3e50")
+        nav_frame.pack(pady=10)
+
+        tk.Button(nav_frame, text="<< Previous", command=self.prev_move).pack(side="left", padx=10)
+        tk.Button(nav_frame, text="Next >>", command=self.next_move).pack(side="left", padx=10)
+        tk.Button(nav_frame, text="Finish Review", command=self.create_menu_ui).pack(side="left", padx=10)
+
+        self.update_review_display()
+
+    def update_review_display(self):
+        data = self.review_analysis[self.review_index]
+        temp_board = chess.Board(data['fen'])
+
+        #Update Piece Placement
+        self.draw_board(temp_board)
+
+        #Highlight the move made during the review
+        move = data['move']
+        f_c, f_r = chess.square_file(move.from_square), 7-chess.square_rank(move.from_square)
+        t_c, t_r = chess.square_file(move.to_square), 7-chess.square_rank(move.to_square)
+
+        self.canvas.create_rectangle(f_c*60, f_r*60, (f_c+1)*60, (f_r+1)*60, outline = "Blue", width= 3)
+        self.canvas.create_rectangle(t_c*60, t_r*60, (t_c+1)*60, (t_r+1)*60, outline = "Blue", width= 3)
+
+        #Update Text
+        color_map = {"Best": "#27ae60", "Good": "#2ecc71", "Inaccuracy": "#f1c40f", "Mistake": "#e67e22", "Blunder": "#e74c3c"}
+        self.exp_label.config(text=f"Move{self.review_index + 1}: {data['quality']}\n{data['exp']}", fg=color_map.get(data['quality'], "white"))
+
+    def next_move(self):
+        if self.review_index < len(self.review_analysis) - 1:
+            self.review_index += 1
+            self.update_review_display()
+
+    def prev_move(self):
+        if self.review_index > 0:
+            self.review_index -= 1
+            self.update_review_display()
 
 app = DylanChessProgram(root)
 root.mainloop()
