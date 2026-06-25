@@ -7,6 +7,8 @@ from PIL import Image, ImageTk
 import chess
 import chess.engine
 import random
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
@@ -31,12 +33,13 @@ class DylanChessProgram:
 
         self.board = chess.Board()
         self.history = []  # Stores (FEN, Move)
-        self.review_analysis = [] # Stores analysis data
+        self.review_analysis_data = [] # Stores analysis data
         self.selected_square = None
         self.ai_level = 0 # 0=Easy, 1=Med, 2=Hard
         self.review_index = -1
 
         self.player_elo = 200 # Starting elo
+        self.elo_history = [200]  # MISSING: Initialize history with starting Elo
 
         self.container = tk.Frame(self.root, bg="#2c3e50")
         self.container.pack(fill="both", expand=True)
@@ -74,10 +77,31 @@ class DylanChessProgram:
         
         tk.Button(frame, text="Play Chess", width=25, command=lambda: self.open_mode_selection()).pack(pady=10)
 
-        tk.Button(frame, text="Review Last Game", width=25, command=lambda: self.run_game_review()).pack(pady=10)
+        if len(self.elo_history) > 1:
+            self.show_performance_graph(frame)
+
+        if self.history:
+            tk.Button(frame, text="Review Last Game", width=25, command=lambda: self.run_game_review()).pack(pady=10)
 
         exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
         exit_button.pack(pady=10)
+
+    def show_performance_graph(self, parent_frame):
+        figure, ax =  plt.subplots(figsize=(4,2), dpi=100)
+        figure.patch.set_facecolor('#2c3e50')
+        ax.patch.set_facecolor('#34495e')
+
+        ax.plot(self.elo_history, marker='o', color='#1abc9c', linewidth=2, markersize=4)
+
+        ax.set_title('Elo Performance', color='white', fontsize=10)
+        ax.tick_params(axis='x', colors='white', labelsize=8)
+        ax.tick_params(axis='y', colors='white', labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_edgecolor('white')
+
+        canvas = FigureCanvasTkAgg(figure, master=parent_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(pady=10)
 
     def open_mode_selection(self):
         self.game_settings = tk.Toplevel(root)
@@ -240,6 +264,7 @@ class DylanChessProgram:
             result_str = self.board.result()
             elo_update = self.calculate_new_elo(result_str)
             direction = "+" if elo_update >= 0 else ""
+            self.elo_history.append(self.player_elo)
 
             self.create_menu_ui()
 
@@ -270,7 +295,6 @@ class DylanChessProgram:
         tk.Label(self.container, text="Stockfish is analysing your performance...", fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
         self.root.update()
 
-        self.review_analysis()
         try:
             with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
                 for fen, move in self.history:
@@ -286,7 +310,7 @@ class DylanChessProgram:
 
                     loss = best_score - actual_score
                     quality, explanation = self.get_explanation(loss, move, best_move)
-                    self.review_analysis.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
+                    self.review_analysis_data.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
 
         except Exception as e:
             messagebox.showerror("Error", f"Analysis Failed:{e}")
@@ -295,6 +319,13 @@ class DylanChessProgram:
 
         self.review_index = 0
         self.show_review_ui()
+
+    def get_explanation(self, loss, move, best):
+        if loss < 20: return "Best", f"Excellent! {move} was the strongest move."
+        if loss < 60: return "Good", f"Solid move. {move} keeps the pressure on."
+        if loss < 150: return "Inaccuracy", f"Inaccuracy. You played {move}, but {best} was slightly better for development."
+        if loss < 350: return "Mistake", f"Mistake. {move} allows your opponent to improve. {best} was necessary."
+        return "Blunder", f"Blunder! {move} loses significant material or position. You should have played {best}."
 
     def show_review_ui(self):
         self.clear_screen()
@@ -319,7 +350,7 @@ class DylanChessProgram:
         self.update_review_display()
 
     def update_review_display(self):
-        data = self.review_analysis[self.review_index]
+        data = self.review_analysis_data[self.review_index]
         temp_board = chess.Board(data['fen'])
 
         #Update Piece Placement
@@ -338,7 +369,7 @@ class DylanChessProgram:
         self.exp_label.config(text=f"Move{self.review_index + 1}: {data['quality']}\n{data['exp']}", fg=color_map.get(data['quality'], "white"))
 
     def next_move(self):
-        if self.review_index < len(self.review_analysis) - 1:
+        if self.review_index < len(self.review_analysis_data) - 1:
             self.review_index += 1
             self.update_review_display()
 
