@@ -6,6 +6,7 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import chess
 import chess.engine
+import chess.variant
 import random
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -294,6 +295,9 @@ class DylanChessProgram:
         self.clear_screen()
         tk.Label(self.container, text="Stockfish is analysing your performance...", fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
         self.root.update()
+        self.total_loss = 0
+        self.moves_count = 0
+        self.review_analysis_data = []
 
         try:
             with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
@@ -308,9 +312,20 @@ class DylanChessProgram:
                     info_after = engine.analyse(board, chess.engine.Limit(time=0.2))
                     actual_score = -info_after["score"].relative.score(mate_score=10000)
 
-                    loss = best_score - actual_score
+                    loss = max(0, best_score - actual_score)
+                    if board.turn == chess.BLACK:
+                        self.total_loss += loss
+                        self.moves_count += 1
+
                     quality, explanation = self.get_explanation(loss, move, best_move)
                     self.review_analysis_data.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
+
+                    if self.moves_count > 0:
+                        acpl = self.total_loss/self.moves_count
+                        accuracy = max(0, 100-(acpl*0.4))
+                        self.performance_rating = round(Bot_ratings[self.ai_level]+(accuracy-50)*12)
+                    else:
+                        self.performance_rating = 0
 
         except Exception as e:
             messagebox.showerror("Error", f"Analysis Failed:{e}")
@@ -320,6 +335,7 @@ class DylanChessProgram:
         self.review_index = 0
         self.show_review_ui()
 
+    #Explanation for moves
     def get_explanation(self, loss, move, best):
         if loss < 20: return "Best", f"Excellent! {move} was the strongest move."
         if loss < 60: return "Good", f"Solid move. {move} keeps the pressure on."
@@ -329,6 +345,11 @@ class DylanChessProgram:
 
     def show_review_ui(self):
         self.clear_screen()
+
+        #Performance Header
+        perf_header = tk.Frame(self.container, bg="#34495e", pady=10)
+        perf_header.pack(fill="x")
+        tk.Label(perf_header, text=f"Estimated Performance: {self.performance_rating} Elo", fg="#f1c40f", bg="#34495e", font=("Arial", 14, "bold")).pack()
 
         #Board
         self.canvas = tk.Canvas(self.container, width=480, height=480, highlightthickness=0)
