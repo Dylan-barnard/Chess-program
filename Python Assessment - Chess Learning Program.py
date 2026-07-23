@@ -40,7 +40,14 @@ class DylanChessProgram:
         self.review_index = -1
 
         self.player_elo = 200 # Starting elo
-        self.elo_history = [200]  # MISSING: Initialize history with starting Elo
+        self.elo_history = [200]
+
+        # Track Lesson Progress
+        self.completed_lessons = {
+            "Piece Movements": False,
+            "Checks and Captures": False,
+            "Checkmates and Stalemates": False
+        }
 
         self.container = tk.Frame(self.root, bg="#2c3e50")
         self.container.pack(fill="both", expand=True)
@@ -60,6 +67,7 @@ class DylanChessProgram:
     def create_menu_ui(self):
         self.clear_screen()
         self.review_index = -1
+        self.lesson_mode = False
         frame = tk.Frame(self.container, bg="#2c3e50")
         frame.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -78,6 +86,8 @@ class DylanChessProgram:
         
         tk.Button(frame, text="Play Chess", width=25, command=lambda: self.open_mode_selection()).pack(pady=10)
 
+        tk.Button(frame, text="Learn Chess (Interactive)", width=25, command=self.show_lesson_menu).pack(pady=5)
+
         if len(self.elo_history) > 1:
             self.show_performance_graph(frame)
 
@@ -86,6 +96,66 @@ class DylanChessProgram:
 
         exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
         exit_button.pack(pady=10)
+
+    def show_lesson_menu(self):
+        self.clear_screen()
+        frame = tk.Frame(self.container, bg="#2c3e50")
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(frame, text="Mandatory Lessons", fg="white", bg="#2c3e50", font=("Arial", 24, "bold")).pack(pady=20)
+
+        lessons = [
+        ("Piece Movements", "1k6/1p6/8/8/4Q3/8/8/6K1 w - - 0 1", "PRACTICE: Move the Queen to any square. The Queen moves horizontally, vertically, and diagonally."),
+        ("Checks and Captures", "k7/8/8/8/8/2n5/1P6/1K6 w - - 0 1", "PRACTICE: The Knight is attacking your King (Check!). Use your Pawn to capture it."),
+        ("Checkmates and Stalemates", "k7/2Q5/8/8/8/8/8/4K3 b - - 0 1", "STUDY: This is a Stalemate. Black has no moves and isn't in check. It's a draw!")
+        ]
+
+        for title, fen, instruction in lessons:
+            status = "✓ " if self.completed_lessons.get(title) else ""
+            btn_color = "#27ae60" if self.completed_lessons.get(title) else "SystemButtonFace"
+            tk.Button(frame, text=f"{status}{title}", width=30, height=2, bg=btn_color, 
+                      command=lambda t=title, f=fen, i=instruction: self.start_interactive_lessons(t, f, i)).pack(pady=10)
+
+        tk.Button(frame, text="Return to Main Menu", width=20, bg="#e74c3c", fg="white",
+            command=self.create_menu_ui).pack(pady=30)
+
+    def start_interactive_lessons(self, title, fen, instruction):
+        self.clear_screen()
+        self.lesson_mode = True
+        self.ai_level = None
+        self.board = chess.Board(fen)
+
+        header = tk.Frame(self.container, bg="#34495e", pady=10)
+        header.pack(fill="x")
+        tk.Label(header, text=title, fg="#f1c40f", bg="#34495e", font=("Arial", 16, "bold")).pack()
+
+        self.lesson_instr_label = tk.Label(self.container, text=instruction, fg="white", bg="#2c3e50", 
+                                      font=("Arial", 11, "italic"), wraplength=500, pady=10)
+        self.lesson_instr_label.pack()
+
+        self.canvas = tk.Canvas(self.container, width=480, height=480, highlightthickness=0)
+        self.canvas.pack(pady=10)
+        self.canvas.bind("<Button-1>", self.handle_click)
+    
+        self.draw_board()
+
+        tk.Button(self.container, text="Back to Lessons", width=20, 
+                command=self.show_lesson_menu).pack(pady=10)
+
+    def check_lesson_goal(self, title, start_fen, move):
+        passed = False
+        if title == "Piece Movements":
+            passed = True
+        elif title == "Checks and Captures":
+            if not self.board.piece_at(chess.C3):
+                passed = True
+        elif title == "Checkmates and Stalemates":
+            passed = True
+
+        if passed:
+            self.completed_lessons[title] = True
+            messagebox.showinfo("Success", f"Lesson'{title}' completed!")
+            self.show_lesson_menu()
 
     def show_performance_graph(self, parent_frame):
         figure, ax =  plt.subplots(figsize=(4,2), dpi=100)
@@ -158,6 +228,7 @@ class DylanChessProgram:
     def handle_click(self, event):
         column, row = event.x//60, 7-(event.y//60)
         square = chess.square(column, row)
+        final_move = None
 
         if self.selected_square is None:
             piece = self.board.piece_at(square)
@@ -174,8 +245,6 @@ class DylanChessProgram:
                     final_move = move
             elif promotion in self.board.legal_moves:
                     final_move = promotion
-            else:
-                    final_move = None
 
             if final_move:
                     self.history.append((self.board.fen(), final_move))
@@ -183,11 +252,14 @@ class DylanChessProgram:
                     self.selected_square = None
                     self.draw_board()
 
-                    if self.ai_level is not None and not self.board.is_game_over():
-                        self.root.after(500, self.make_ai_move)
-
+                    if not getattr(self, 'lesson_mode', False):
+                        if self.ai_level is not None and not self.board.is_game_over():
+                            self.root.after(500, self.make_ai_move)
+                        else:
+                            self.check_end()
                     else:
-                        self.check_end()
+                        if self.board.is_game_over():
+                            self.check_end()
                         
             else:
                 self.selected_square = None
@@ -263,9 +335,11 @@ class DylanChessProgram:
         if self.board.is_game_over():
             messagebox.showinfo("Game Over", f"Result: {self.board.result()}")
             result_str = self.board.result()
-            elo_update = self.calculate_new_elo(result_str)
-            direction = "+" if elo_update >= 0 else ""
-            self.elo_history.append(self.player_elo)
+
+
+            if not getattr(self, 'lesson_mode', False):
+                elo_update = self.calculate_new_elo(result_str)
+                self.elo_history.append(self.player_elo)
 
             self.create_menu_ui()
 
@@ -278,7 +352,7 @@ class DylanChessProgram:
             actual_score = 0.5
         
         player_rating = self.player_elo
-        bot_rating = Bot_ratings[self.ai_level]
+        bot_rating = Bot_ratings.get(self.ai_level, 200)
         k_factor = 32
 
         # Calculate expected score
@@ -295,8 +369,8 @@ class DylanChessProgram:
         self.clear_screen()
         tk.Label(self.container, text="Stockfish is analysing your performance...", fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
         self.root.update()
-        self.total_loss = 0
-        self.moves_count = 0
+        current_total_loss = 0
+        current_moves_count = 0
         self.review_analysis_data = []
 
         try:
@@ -314,18 +388,19 @@ class DylanChessProgram:
 
                     loss = max(0, best_score - actual_score)
                     if board.turn == chess.BLACK:
-                        self.total_loss += loss
-                        self.moves_count += 1
+                        current_total_loss += loss
+                        current_moves_count += 1
 
                     quality, explanation = self.get_explanation(loss, move, best_move)
                     self.review_analysis_data.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
 
-                    if self.moves_count > 0:
-                        acpl = self.total_loss/self.moves_count
-                        accuracy = max(0, 100-(acpl*0.4))
-                        self.performance_rating = round(Bot_ratings[self.ai_level]+(accuracy-50)*12)
-                    else:
-                        self.performance_rating = 0
+                if current_moves_count > 0:
+                    acpl = current_total_loss/current_moves_count
+                    accuracy = max(0, 100-(acpl*0.4))
+                    base_rating = Bot_ratings.get(self.ai_level, 200)
+                    self.performance_rating = round(base_rating[self.ai_level]+(accuracy-50)*12)
+                else:
+                    self.performance_rating = 0
 
         except Exception as e:
             messagebox.showerror("Error", f"Analysis Failed:{e}")
