@@ -6,15 +6,21 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import chess
 import chess.engine
+import chess.pgn
 import chess.variant
 import random
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import csv
+import glob
+import io
+import os
 
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
 PIECES = {'R':'♖','N':'♘','B':'♗','Q':'♕','K':'♔','P':'♙','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚','p':'♟'}
-STOCKFISH_PATH = "G:\\My Drive\\Level 3 NCEA\\L3DTSD\\stockfish-windows-x86-64-avx2\\stockfish\\stockfish-windows-x86-64-avx2.exe"
+STOCKFISH_PATH = (r"G:\\My Drive\\Level 3 NCEA\\L3DTSD\\stockfish-windows-x86-64-avx2\\stockfish\\stockfish-windows-x86-64-avx2.exe")
+OPENING_FOLDER = (r"G:\\My Drive\\Level 3 NCEA\\L3DTSD\\chess-openings-master")
 
 Bot_ratings = {
     0: 200,
@@ -38,6 +44,7 @@ class DylanChessProgram:
         self.selected_square = None
         self.ai_level = 0 # 0=Easy, 1=Med, 2=Hard
         self.review_index = -1
+        self.opening_database = self.load_opening_database()
 
         self.player_elo = 200 # Starting elo
         self.elo_history = [200]
@@ -52,6 +59,57 @@ class DylanChessProgram:
         self.container = tk.Frame(self.root, bg="#2c3e50")
         self.container.pack(fill="both", expand=True)
         self.create_menu_ui()
+
+    def load_opening_database(self):
+        opening_database = {}
+
+        for filename in glob.glob(os.path.join(OPENING_FOLDER, "*.tsv")):
+            try:
+                with open(filename, "r", encoding="utf-8") as file:
+                    reader = csv.DictReader(file, delimiter="\t")
+
+                    for row in reader:
+                        eco = row.get("eco", "").strip()
+                        name = row.get("name", "").strip()
+                        pgn_text = row.get("pgn", "").strip()
+
+                        if not pgn_text or not name:
+                            continue
+
+                        try:
+                            game = chess.pgn.read_game(io.StringIO(pgn_text))
+
+                            if game is None:
+                                continue
+
+                            board = game.board()
+
+                            # Store every position in the opening line.
+                            for move in game.mainline_moves():
+                                position_key = board.epd()
+                                opening_database[position_key] = {
+                                    "eco": eco,
+                                    "name": name
+                                }
+                                board.push(move)
+
+                            # Also store the final position.
+                            opening_database[board.epd()] = {
+                                "eco": eco,
+                                "name": name
+                            }
+
+                        except Exception as error:
+                            print(f"Could not read opening line: {error}")
+
+            except FileNotFoundError:
+                print(f"Opening file not found: {filename}")
+
+        return opening_database
+
+    def get_opening_name(self, board):
+        position_key = board.epd()
+        return self.opening_database.get(position_key)
 
     def clear_screen(self):
         for window in self.container.winfo_children(): window.destroy()
@@ -204,10 +262,11 @@ class DylanChessProgram:
         tk.Button(self.game_settings, text="Player vs AI Level 2(600 Elo)", width=25, command=lambda: self.start_game(5)).pack(pady=10)
         tk.Button(self.game_settings, text="Player vs AI Level 3(1000 Elo)", width=25, command=lambda: self.start_game(10)).pack(pady=10)
         
-    def start_game(self, level):
+    def start_game(self, level, player_color=chess.WHITE):
         self.board = chess.Board()
         self.game_settings.destroy()
         self.ai_level = level
+        self.player_color = player_color
         self.history = []
         self.clear_screen()
         self.chess_board_ui()
@@ -328,16 +387,20 @@ class DylanChessProgram:
                     return
                 
                 with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                    engine.configure({"Skill Level": 0})
-                    engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
-                    self.execute_bot_move(engine_move.move)
-                    return
+                    if self.ai_level == 5:
+                        skill_level = 5
+                        engine.configure({"Skill Level": skill_level})
+                        engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
+                        self.execute_bot_move(engine_move.move)
+                        return
 
             else:
                 with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                    engine.configure({"Skill Level": 0})
-                    engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
-                    self.execute_bot_move(engine_move.move)
+                    if self.ai_level == 10:
+                        skill_level = 15
+                        engine.configure({"Skill Level": skill_level})
+                        engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
+                        self.execute_bot_move(engine_move.move)
 
         except Exception as e:
             print(f"Engine Error: {e}")
@@ -390,44 +453,93 @@ class DylanChessProgram:
 
     def run_game_review(self):
         self.clear_screen()
-        tk.Label(self.container, text="Stockfish is analysing your performance...", fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
+        tk.Label(self.container, text="Stockfish is analysing your performance...",
+                fg="white", bg="#2c3e50", font=("Arial", 14)).pack(pady=10)
         self.root.update()
         current_total_loss = 0
         current_moves_count = 0
         self.review_analysis_data = []
-        player_color = chess.WHITE
+        player_color = self.player_color
 
         try:
             with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                for fen, move in self.history:
-                    board = chess.Board(fen)
-                    current_turn = board.turn
-                
-                    # Analysis
-                    info = engine.analyse(board, chess.engine.Limit(time=0.2))
-                    best_move = info["pv"][0]
-                    best_score = info["score"].relative.score(mate_score=10000)
+                for move_number, (fen, move) in enumerate(self.history):
+                    board_before = chess.Board(fen)
+                    opening = self.get_opening_name(board_before)
+                    current_turn = board_before.turn
 
-                    board.push(move)
-                    info_after = engine.analyse(board, chess.engine.Limit(time=0.2))
-                    actual_score = -info_after["score"].relative.score(mate_score=10000)
+                    # Use multiple principal variations so the reviewer can identify
+                    # theoretical and alternative strong moves.
+                    analysis = engine.analyse(
+                        board_before,
+                        chess.engine.Limit(depth=18),
+                        multipv=3
+                    )
+
+                    if not analysis:
+                        continue
+
+                    best_info = analysis[0]
+                    best_move = best_info["pv"][0]
+                    best_score = best_info["score"].pov(current_turn).score(mate_score=10000)
+
+                    # Evaluate the move that was actually played.
+                    board_after = board_before.copy()
+                    board_after.push(move)
+                    after_info = engine.analyse(
+                        board_after,
+                        chess.engine.Limit(time=0.2)
+                    )
+                    actual_score = after_info["score"].pov(current_turn).score(mate_score=10000)
 
                     loss = max(0, best_score - actual_score)
+                    quality, explanation = self.get_move_classification(
+                        board_before,
+                        move,
+                        best_move,
+                        best_score,
+                        actual_score,
+                        loss,
+                        move_number
+                    )
+
+                    if opening is not None:
+                        quality = "Theoretical"
+                        explanation = (f"{board_before.san(move)} follows the theoretical line " f"of {opening['name']} ({opening['eco']}).")
+                    else:
+                        quality, explanation = self.get_move_classification(board_before, move, best_move, best_score, actual_score, loss, move_number)
+
+                    # Only use the player's moves for performance rating.
                     if current_turn == player_color:
                         current_total_loss += loss
                         current_moves_count += 1
 
-                    quality, explanation = self.get_explanation(loss, move, best_move)
-                    self.review_analysis_data.append({'fen': fen, 'move': move, 'quality': quality, 'exp': explanation})
+                    if opening is not None:
+                        opening_name = opening["name"]
+                        opening_eco = opening["eco"]
 
-                if current_moves_count > 0:
-                    acpl = current_total_loss / current_moves_count
-                    accuracy = max(0, 100 - (acpl * 0.4))
-                    base_rating = Bot_ratings.get(self.ai_level, 200)
-                    perf = round(base_rating + (accuracy - 50) * 12)
-                    self.performance_rating = max(100, perf)
-                else:
-                    self.performance_rating = 100
+                        quality = "Theoretical"
+                        explanation = (
+                            f"{board_before.san(move)} follows the theoretical line "
+                            f"of {opening_name} ({opening_eco})."
+                            )
+                    else:
+                        opening_name = "Opening not recognised"
+                        opening_eco = ""
+
+                        quality, explanation = self.get_move_classification(board_before, move, best_move, best_score, actual_score, loss, move_number)
+
+                    self.review_analysis_data.append({
+                        "fen": fen, "move": move, "best_move": best_move, "quality": quality, "exp": explanation, "loss": loss, "opening_name": opening_name, "opening_eco": opening_eco})
+
+            if current_moves_count > 0:
+                acpl = current_total_loss / current_moves_count
+                accuracy = max(0, min(100, 100 * (1 - acpl / 300)))
+                opponent_rating = Bot_ratings.get(self.ai_level, 200)
+                estimated_rating = opponent_rating + ((accuracy - 50) * 8)
+                self.performance_rating = max(100, round(estimated_rating))
+            else:
+                self.performance_rating = 100
 
         except Exception as e:
             messagebox.showerror("Error", f"Analysis Failed: {e}")
@@ -437,32 +549,80 @@ class DylanChessProgram:
         self.review_index = 0
         self.show_review_ui()
 
-    #Explanation for moves
+    def get_move_classification(self, board, move, best_move, best_score, actual_score, loss, move_number):
+        """Classifies a move using engine loss and simple tactical heuristics."""
+
+        move_text = board.san(move)
+        best_text = board.san(best_move)
+        is_capture = board.is_capture(move)
+        is_best = move == best_move
+
+        # A sacrifice that keeps approximately the engine's best evaluation is
+        # treated as brilliant. This is a heuristic, not a formal chess label.
+        moving_piece = board.piece_at(move.from_square)
+        captured_piece = board.piece_at(move.to_square)
+        piece_values = {
+            chess.PAWN: 100,
+            chess.KNIGHT: 320,
+            chess.BISHOP: 330,
+            chess.ROOK: 500,
+            chess.QUEEN: 900,
+            chess.KING: 20000
+        }
+        moved_value = piece_values.get(moving_piece.piece_type, 0) if moving_piece else 0
+        captured_value = piece_values.get(captured_piece.piece_type, 0) if captured_piece else 0
+        is_sacrifice = moved_value > captured_value and not is_capture
+
+        # Opening moves close to Stockfish's principal variations are labelled
+        # theoretical. A real opening-book database would be needed for certainty.
+        if move_number < 12 and loss <= 30:
+            return "Theoretical", f"{move_text} follows a common opening idea."
+
+        if is_sacrifice and loss <= 5:
+            return "Brilliant", f"Brilliant idea! {move_text} sacrifices material while keeping a strong position."
+
+        if is_best and loss <= 10:
+            return "Great", f"Great move! {move_text} is Stockfish's top choice."
+
+        # A miss means a strong opportunity was available but not played.
+        if best_score >= 100 and loss >= 60:
+            return "Miss", f"You missed a strong opportunity. {best_text} was better than {move_text}."
+
+        if loss <= 30:
+            return "Great", f"Strong move. {move_text} keeps the position healthy."
+        if loss <= 80:
+            return "Inaccuracy", f"Inaccuracy: {move_text} loses a small amount compared with {best_text}."
+        if loss <= 250:
+            return "Mistake", f"Mistake: {best_text} was better than {move_text}."
+        return "Blunder", f"Blunder: {move_text} loses significant evaluation. Consider {best_text}."
+
+# Keep this method if other parts of your program still call it.
     def get_explanation(self, loss, move, best):
-        if loss < 20: return "Best", f"Excellent! {move} was the strongest move."
-        if loss < 60: return "Good", f"Solid move. {move} keeps the pressure on."
-        if loss < 150: return "Inaccuracy", f"Inaccuracy. You played {move}, but {best} was slightly better for development."
-        if loss < 350: return "Mistake", f"Mistake. {move} allows your opponent to improve. {best} was necessary."
-        return "Blunder", f"Blunder! {move} loses significant material or position. You should have played {best}."
+        if loss <= 10:
+            return "Great", f"{move} was one of the engine's strongest moves."
+        if loss <= 80:
+            return "Inaccuracy", f"{move} was playable, but {best} was more accurate."
+        if loss <= 250:
+            return "Mistake", f"{best} was better than {move}."
+        return "Blunder", f"{move} lost significant evaluation; consider {best}."
 
     def show_review_ui(self):
         self.clear_screen()
-
-        #Performance Header
         perf_header = tk.Frame(self.container, bg="#34495e", pady=10)
         perf_header.pack(fill="x")
-        tk.Label(perf_header, text=f"Estimated Performance: {self.performance_rating} Elo", fg="#f1c40f", bg="#34495e", font=("Arial", 14, "bold")).pack()
+        tk.Label(perf_header, text=f"Estimated Performance: {round(self.performance_rating)} Elo", fg="#f1c40f",
+                bg="#34495e", font=("Arial", 14, "bold")).pack()
 
-        #Board
         self.canvas = tk.Canvas(self.container, width=480, height=480, highlightthickness=0)
         self.canvas.pack(pady=10)
 
-        #Explanation Area
-        self.exp_label = tk.Label(self.container, text="", fg="white", bg="#2c3e50", font=
-        ("Arial", 11, "italic"), wraplength=400, height=4)
+        self.exp_label = tk.Label(self.container, text="", fg="white", bg="#2c3e50",
+                                    font=("Arial", 11, "italic"), wraplength=450, height=5)
         self.exp_label.pack(fill="x", padx=20)
 
-        #General Navigation
+        self.opening_label = tk.Label(self.container, text="Opening: Not recognised", fg="#3498db", bg="#2c3e50", font=("Arial", 12, "bold"))
+        self.opening_label.pack(pady=5)
+
         nav_frame = tk.Frame(self.container, bg="#2c3e50")
         nav_frame.pack(pady=10)
 
@@ -474,22 +634,45 @@ class DylanChessProgram:
 
     def update_review_display(self):
         data = self.review_analysis_data[self.review_index]
-        temp_board = chess.Board(data['fen'])
-
-        #Update Piece Placement
+        temp_board = chess.Board(data["fen"])
         self.draw_board(temp_board)
 
-        #Highlight the move made during the review
-        move = data['move']
-        f_c, f_r = chess.square_file(move.from_square), 7-chess.square_rank(move.from_square)
-        t_c, t_r = chess.square_file(move.to_square), 7-chess.square_rank(move.to_square)
+        move = data["move"]
+        f_c, f_r = chess.square_file(move.from_square), 7 - chess.square_rank(move.from_square)
+        t_c, t_r = chess.square_file(move.to_square), 7 - chess.square_rank(move.to_square)
 
-        self.canvas.create_rectangle(f_c*60, f_r*60, (f_c+1)*60, (f_r+1)*60, outline = "Blue", width= 3)
-        self.canvas.create_rectangle(t_c*60, t_r*60, (t_c+1)*60, (t_r+1)*60, outline = "Blue", width= 3)
+        self.canvas.create_rectangle(f_c * 60, f_r * 60, (f_c + 1) * 60, 
+                                    (f_r + 1) * 60, outline="Blue", width=3)
+        self.canvas.create_rectangle(t_c * 60, t_r * 60, (t_c + 1) * 60, 
+                                    (t_r + 1) * 60, outline="Blue", width=3)
 
-        #Update Text
-        color_map = {"Best": "#27ae60", "Good": "#2ecc71", "Inaccuracy": "#f1c40f", "Mistake": "#e67e22", "Blunder": "#e74c3c"}
-        self.exp_label.config(text=f"Move{self.review_index + 1}: {data['quality']}\n{data['exp']}", fg=color_map.get(data['quality'], "white"))
+        color_map = {
+            "Theoretical": "#836135",
+            "Brilliant": "#00bcd4",
+            "Great": "#27ae60",
+            "Good": "#2ecc71",
+            "Inaccuracy": "#f1c40f",
+            "Miss": "#e67e22",
+            "Mistake": "#e67e22",
+            "Blunder": "#e74c3c"
+        }
+
+        best_move = data.get("best_move")
+        best_text = ""
+        if best_move is not None:
+            best_text = f"Engine suggestion: {temp_board.san(best_move)}"
+        opening_name = data.get(
+            "opening_name",
+            "Opening not recognised")
+
+        opening_eco = data.get(
+            "opening_eco",
+            "")
+
+        if opening_eco:
+            self.opening_label.config(text=f"Opening: {opening_name} ({opening_eco})")
+        else:
+            self.opening_label.config(text=f"Opening: {opening_name}")
 
     def next_move(self):
         if self.review_index < len(self.review_analysis_data) - 1:
