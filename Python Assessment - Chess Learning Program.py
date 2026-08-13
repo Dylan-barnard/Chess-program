@@ -19,8 +19,8 @@ import os
 Square_Size = 60
 Colors = ["#eeeed2", "#769656"]
 PIECES = {'R':'♖','N':'♘','B':'♗','Q':'♕','K':'♔','P':'♙','r':'♜','n':'♞','b':'♝','q':'♛','k':'♚','p':'♟'}
-STOCKFISH_PATH = (r"G:\\My Drive\\Level 3 NCEA\\L3DTSD\\stockfish-windows-x86-64-avx2\\stockfish\\stockfish-windows-x86-64-avx2.exe")
-OPENING_FOLDER = (r"G:\\My Drive\\Level 3 NCEA\\L3DTSD\\chess-openings-master")
+STOCKFISH_PATH = (r"G:\My Drive\Level 3 NCEA\L3DTSD\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe")
+OPENING_FOLDER = (r"G:\My Drive\Level 3 NCEA\L3DTSD\chess-openings-master\chess-openings-master")
 
 Bot_ratings = {
     0: 200,
@@ -86,7 +86,7 @@ class DylanChessProgram:
 
                             # Store every position in the opening line.
                             for move in game.mainline_moves():
-                                position_key = board.epd()
+                                position_key = board.epd(en_passant="fen")
                                 opening_database[position_key] = {
                                     "eco": eco,
                                     "name": name
@@ -94,10 +94,12 @@ class DylanChessProgram:
                                 board.push(move)
 
                             # Also store the final position.
-                            opening_database[board.epd()] = {
+                            opening_database[board.epd(en_passant="fen")] = {
                                 "eco": eco,
                                 "name": name
                             }
+
+
 
                         except Exception as error:
                             print(f"Could not read opening line: {error}")
@@ -105,10 +107,14 @@ class DylanChessProgram:
             except FileNotFoundError:
                 print(f"Opening file not found: {filename}")
 
+        print("Opening folder:", OPENING_FOLDER)
+        print("Folder exists:", os.path.isdir(OPENING_FOLDER))
+        print("TSV files:", glob.glob(os.path.join(OPENING_FOLDER, "*.tsv")))
+        print("Opening positions loaded:", len(opening_database))
         return opening_database
 
     def get_opening_name(self, board):
-        position_key = board.epd()
+        position_key = board.epd(en_passant="fen")
         return self.opening_database.get(position_key)
 
     def clear_screen(self):
@@ -266,7 +272,7 @@ class DylanChessProgram:
         self.board = chess.Board()
         self.game_settings.destroy()
         self.ai_level = level
-        self.player_color = player_color
+        player_color == getattr(self, "player_color", chess.WHITE)
         self.history = []
         self.clear_screen()
         self.chess_board_ui()
@@ -465,15 +471,14 @@ class DylanChessProgram:
             with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
                 for move_number, (fen, move) in enumerate(self.history):
                     board_before = chess.Board(fen)
-                    opening = self.get_opening_name(board_before)
                     current_turn = board_before.turn
 
                     # Use multiple principal variations so the reviewer can identify
                     # theoretical and alternative strong moves.
                     analysis = engine.analyse(
                         board_before,
-                        chess.engine.Limit(depth=18),
-                        multipv=3
+                        chess.engine.Limit(time=0.3),
+                        multipv=1
                     )
 
                     if not analysis:
@@ -493,20 +498,24 @@ class DylanChessProgram:
                     actual_score = after_info["score"].pov(current_turn).score(mate_score=10000)
 
                     loss = max(0, best_score - actual_score)
-                    quality, explanation = self.get_move_classification(
-                        board_before,
-                        move,
-                        best_move,
-                        best_score,
-                        actual_score,
-                        loss,
-                        move_number
-                    )
+
+                    # Check the opening database first.
+                    opening = self.get_opening_name(board_before)
 
                     if opening is not None:
+                    # Theoretical takes priority over all other classifications.
+                        opening_name = opening["name"]
+                        opening_eco = opening["eco"]
                         quality = "Theoretical"
-                        explanation = (f"{board_before.san(move)} follows the theoretical line " f"of {opening['name']} ({opening['eco']}).")
+
+                        explanation = (
+                            f"{board_before.san(move)} follows the theoretical line "
+                            f"of {opening_name} ({opening_eco})."
+                        )
                     else:
+                        opening_name = "Opening not recognised"
+                        opening_eco = ""
+
                         quality, explanation = self.get_move_classification(board_before, move, best_move, best_score, actual_score, loss, move_number)
 
                     # Only use the player's moves for performance rating.
@@ -514,23 +523,7 @@ class DylanChessProgram:
                         current_total_loss += loss
                         current_moves_count += 1
 
-                    if opening is not None:
-                        opening_name = opening["name"]
-                        opening_eco = opening["eco"]
-
-                        quality = "Theoretical"
-                        explanation = (
-                            f"{board_before.san(move)} follows the theoretical line "
-                            f"of {opening_name} ({opening_eco})."
-                            )
-                    else:
-                        opening_name = "Opening not recognised"
-                        opening_eco = ""
-
-                        quality, explanation = self.get_move_classification(board_before, move, best_move, best_score, actual_score, loss, move_number)
-
-                    self.review_analysis_data.append({
-                        "fen": fen, "move": move, "best_move": best_move, "quality": quality, "exp": explanation, "loss": loss, "opening_name": opening_name, "opening_eco": opening_eco})
+                    self.review_analysis_data.append({"fen": fen, "move": move, "best_move": best_move, "quality": quality, "exp": explanation, "loss": loss, "opening_name": opening_name, "opening_eco": opening_eco})
 
             if current_moves_count > 0:
                 acpl = current_total_loss / current_moves_count
@@ -560,26 +553,46 @@ class DylanChessProgram:
         # A sacrifice that keeps approximately the engine's best evaluation is
         # treated as brilliant. This is a heuristic, not a formal chess label.
         moving_piece = board.piece_at(move.from_square)
-        captured_piece = board.piece_at(move.to_square)
+
         piece_values = {
             chess.PAWN: 100,
             chess.KNIGHT: 320,
             chess.BISHOP: 330,
             chess.ROOK: 500,
             chess.QUEEN: 900,
-            chess.KING: 20000
-        }
-        moved_value = piece_values.get(moving_piece.piece_type, 0) if moving_piece else 0
-        captured_value = piece_values.get(captured_piece.piece_type, 0) if captured_piece else 0
-        is_sacrifice = moved_value > captured_value and not is_capture
+            chess.KING: 20000}
 
-        # Opening moves close to Stockfish's principal variations are labelled
-        # theoretical. A real opening-book database would be needed for certainty.
-        if move_number < 12 and loss <= 30:
-            return "Theoretical", f"{move_text} follows a common opening idea."
+        moved_value = (
+                piece_values.get(moving_piece.piece_type, 0)
+                if moving_piece else 0
+            )
+
+        # Look at the position after the move.
+        board_after = board.copy()
+        board_after.push(move)
+
+        # Check whether the opponent can capture the piece that just moved.
+        piece_can_be_captured = any(
+            opponent_move.to_square == move.to_square
+            for opponent_move in board_after.legal_moves
+        )
+
+        creates_check = board_after.is_check()
+
+        # Only valuable pieces can normally be sacrificed.
+        valuable_piece = moved_value >= piece_values[chess.KNIGHT]
+
+        # Strict definition to reduce false Brilliant labels.
+        is_sacrifice = (
+            valuable_piece
+            and piece_can_be_captured
+            and (creates_check or is_capture)
+        )
 
         if is_sacrifice and loss <= 5:
-            return "Brilliant", f"Brilliant idea! {move_text} sacrifices material while keeping a strong position."
+            return ("Brilliant", f"Brilliant idea! {move_text} offers material "
+        "for a strong tactical advantage."
+    )
 
         if is_best and loss <= 10:
             return "Great", f"Great move! {move_text} is Stockfish's top choice."
@@ -673,6 +686,11 @@ class DylanChessProgram:
             self.opening_label.config(text=f"Opening: {opening_name} ({opening_eco})")
         else:
             self.opening_label.config(text=f"Opening: {opening_name}")
+
+        self.exp_label.config(text=(
+        f"Move {self.review_index + 1}: {data['quality']}\n"
+        f"{data['exp']}{best_text}"
+        ),fg=color_map.get(data["quality"], "white"))
 
     def next_move(self):
         if self.review_index < len(self.review_analysis_data) - 1:
