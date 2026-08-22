@@ -1,18 +1,21 @@
 {
   "tester": {
     "password": "test123",
-    "player_elo": 244,
+    "player_elo": 258,
     "elo_history": [
       200,
       231.68316831683168,
       231.6198458391945,
       228.56565312019694,
-      243.66759351312757
+      243.66759351312757,
+      257.98448870068495,
+      257.5438432065004
     ],
     "completed_lessons": {
-      "Piece Movements": false,
-      "Checks and Captures": false,
-      "Checkmates and Stalemates": false
+      "Piece Movements": true,
+      "Checks and Captures": true,
+      "Checkmates and Stalemates": false,
+      "Stalemates": true
     }
   },
   "344": {
@@ -29,6 +32,18 @@
   },
   "thesuperpoweredflyingwarthogstyledpigthatcanandwilleatpotatos": {
     "password": "1",
+    "player_elo": 200,
+    "elo_history": [
+      200
+    ],
+    "completed_lessons": {
+      "Piece Movements": false,
+      "Checks and Captures": false,
+      "Checkmates and Stalemates": false
+    }
+  },
+  "t": {
+    "password": "t",
     "player_elo": 200,
     "elo_history": [
       200
