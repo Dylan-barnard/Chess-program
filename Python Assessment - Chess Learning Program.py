@@ -8,13 +8,13 @@ from PIL import Image, ImageTk
 import chess
 import chess.engine
 import chess.pgn
-import chess.variant
 import random
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import csv
 import glob
 import io
+import json
 import os
 import time
 
@@ -26,6 +26,7 @@ PIECES = {
     }
 STOCKFISH_PATH = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\stockfish-windows-x86-64-avx2-20260821T230608Z-1-001\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe")
 OPENING_FOLDER = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\chess learning website assets\chess openings")
+ACCOUNT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tester_accounts.json")
 
 Bot_ratings = {
     0: 200,
@@ -56,6 +57,8 @@ class DylanChessProgram:
         self.review_index = -1
         self.opening_database = self.load_opening_database()
         self.graduation_shown = False
+        self.current_user = None
+        self.accounts = self.load_accounts()
 
         self.player_elo = 990  # Starting elo
         self.elo_history = [990]
@@ -75,6 +78,127 @@ class DylanChessProgram:
 
         self.container = tk.Frame(self.root, bg="#2c3e50")
         self.container.pack(fill="both", expand=True)
+        self.create_login_ui()
+
+    def load_accounts(self):
+        """Load all tester accounts from the local JSON file."""
+        if not os.path.exists(ACCOUNT_FILE):
+            return {}
+
+        try:
+            with open(ACCOUNT_FILE, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def save_accounts(self):
+        """Save the current account dictionary to disk."""
+        with open(ACCOUNT_FILE, "w", encoding="utf-8") as file:
+            json.dump(self.accounts, file, indent=2)
+
+    def get_default_profile(self):
+        """Return a fresh account profile for a new tester."""
+        return {
+            "password": "",
+            "player_elo": 200,
+            "elo_history": [200],
+            "completed_lessons": {
+                "Piece Movements": False,
+                "Checks and Captures": False,
+                "Checkmates and Stalemates": False
+            }
+        }
+
+    def apply_profile_to_session(self, username):
+        """Load the saved profile for the chosen tester into the app state."""
+        profile = self.accounts.get(username, self.get_default_profile())
+        self.current_user = username
+        self.player_elo = profile.get("player_elo", 200)
+        self.elo_history = profile.get("elo_history", [self.player_elo])
+        self.completed_lessons = {
+            "Piece Movements": profile.get("completed_lessons", {}).get("Piece Movements", False),
+            "Checks and Captures": profile.get("completed_lessons", {}).get("Checks and Captures", False),
+            "Checkmates and Stalemates": profile.get("completed_lessons", {}).get("Checkmates and Stalemates", False)
+        }
+        self.graduation_shown = self.player_elo >= 1000
+
+    def save_profile(self):
+        """Write the current tester's progress to the account file."""
+        if self.current_user is None:
+            return
+
+        profile = self.accounts.setdefault(self.current_user, self.get_default_profile())
+        profile["player_elo"] = round(self.player_elo)
+        profile["elo_history"] = self.elo_history
+        profile["completed_lessons"] = self.completed_lessons
+        self.save_accounts()
+
+    def create_login_ui(self):
+        """Create the login and sign-up screen for tester accounts."""
+        self.clear_screen()
+
+        frame = tk.Frame(self.container, bg="#2c3e50")
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(frame, text="Tester Login", fg="white", bg="#2c3e50",
+                 font=("Arial", 28, "bold")).pack(pady=(0, 20))
+
+        tk.Label(frame, text="Username", fg="white", bg="#2c3e50").pack(anchor="w", padx=30)
+        self.username_entry = tk.Entry(frame, width=30)
+        self.username_entry.pack(pady=(0, 10), padx=30)
+
+        tk.Label(frame, text="Password", fg="white", bg="#2c3e50").pack(anchor="w", padx=30)
+        self.password_entry = tk.Entry(frame, width=30, show="*")
+        self.password_entry.pack(pady=(0, 20), padx=30)
+
+        btn_frame = tk.Frame(frame, bg="#2c3e50")
+        btn_frame.pack()
+        tk.Button(btn_frame, text="Login", width=12, command=self.login_user_action).pack(side="left", padx=10)
+        tk.Button(btn_frame, text="Create Account", width=12, command=self.create_account_action).pack(side="left", padx=10)
+
+    def login_user_action(self):
+        """Log in an existing tester by username and password."""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get()
+
+        if not username:
+            messagebox.showerror("Login failed", "Please enter a username.")
+            return
+
+        if username not in self.accounts:
+            messagebox.showerror("Login failed", "No account exists for that tester.")
+            return
+
+        if self.accounts[username].get("password") != password:
+            messagebox.showerror("Login failed", "Incorrect password.")
+            return
+
+        self.apply_profile_to_session(username)
+        self.create_menu_ui()
+
+    def create_account_action(self):
+        """Create a new tester account and save it."""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get()
+
+        if not username:
+            messagebox.showerror("Account failed", "Please enter a username.")
+            return
+
+        if username in self.accounts:
+            messagebox.showerror("Account failed", "That tester name already exists.")
+            return
+
+        if not password:
+            messagebox.showerror("Account failed", "Please enter a password.")
+            return
+
+        new_profile = self.get_default_profile()
+        new_profile["password"] = password
+        self.accounts[username] = new_profile
+        self.save_accounts()
+        self.apply_profile_to_session(username)
         self.create_menu_ui()
 
     def load_opening_database(self):
@@ -143,10 +267,12 @@ class DylanChessProgram:
         """Asks whether you want to leave before closing the program."""
         if messagebox.askokcancel("Exit the program",
                                   "Are you sure you want to exit?"):
+            self.save_profile()
             self.root.destroy()
 
     def create_menu_ui(self):
         """Create the UI for the menu."""
+        self.save_profile()
         self.clear_screen()
         self.review_index = -1
         self.lesson_mode = False
@@ -163,6 +289,10 @@ class DylanChessProgram:
         tk.Label(frame, text="Dylan's Chess", fg="white",
                  bg="#2c3e50", font=("Courier", 32, "bold")).pack(pady=10)
 
+        if self.current_user:
+            tk.Label(frame, text=f"Tester: {self.current_user}", fg="#f1c40f", bg="#2c3e50",
+                     font=("Arial", 12, "bold")).pack(pady=(0, 5))
+
         tk.Label(frame, text=f"Your Rating: {round(self.player_elo)} Elo", fg="#1abc9c", bg="#2c3e50",
                  font=("Arial", 16, "bold")).pack(pady=10)
 
@@ -176,8 +306,16 @@ class DylanChessProgram:
         if self.history:
             tk.Button(frame, text="Review Last Game", width=25, command=lambda: self.run_game_review()).pack(pady=10)
 
+        tk.Button(frame, text="Logout", width=25, command=self.logout_user).pack(pady=5)
+
         exit_button = tk.Button(frame, text="Exit", width=25, command=self.on_closing)
         exit_button.pack(pady=10)
+
+    def logout_user(self):
+        """Log out the current tester and return to the login screen."""
+        self.save_profile()
+        self.current_user = None
+        self.create_login_ui()
 
     def show_lesson_menu(self):
         """Show the menu for lessons."""
@@ -259,6 +397,7 @@ class DylanChessProgram:
 
         if passed:
             self.completed_lessons[title] = True
+            self.save_profile()
             messagebox.showinfo("Success", f"Lesson'{title}' completed!")
             self.show_lesson_menu()
 
@@ -321,8 +460,8 @@ class DylanChessProgram:
         black_mins = int(black_time // 60)
         black_secs = int(black_time % 60)
 
-        return(
-            f"White: {white_mins:02d}:{white_secs:02d} " 
+        return (
+            f"White: {white_mins:02d}:{white_secs:02d} "
             f"Black: {black_mins:02d}:{black_secs:02d}"
             )
 
@@ -464,66 +603,78 @@ class DylanChessProgram:
                 self.selected_square = None
                 self.draw_board()
 
+    def choose_elo_move(self, board, target_elo):
+        """Pick a move that resembles a human player around the target Elo."""
+        legal_moves = list(board.legal_moves)
+        if not legal_moves:
+            return None
+
+        if target_elo <= 200:
+            depth = 1
+            blunder_chance = 0.35
+            candidate_limit = 4
+            score_variation = 220
+        elif target_elo <= 600:
+            depth = 2
+            blunder_chance = 0.18
+            candidate_limit = 3
+            score_variation = 140
+        else:
+            depth = 3
+            blunder_chance = 0.08
+            candidate_limit = 2
+            score_variation = 90
+
+        try:
+            with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+                analysis = engine.analyse(board, chess.engine.Limit(depth=depth), multipv=8)
+                scored_moves = []
+
+                for info in analysis:
+                    pv = info.get("pv", [])
+                    if not pv:
+                        continue
+
+                    move = pv[0]
+                    if move not in legal_moves:
+                        continue
+
+                    score = info["score"].pov(board.turn).score(mate_score=10000)
+
+                    if random.random() < blunder_chance:
+                        score -= random.randint(150, 500)
+                    else:
+                        score += random.randint(-50, 120)
+
+                    if board.is_capture(move):
+                        score += 20
+
+                    scored_moves.append((move, score))
+
+                if not scored_moves:
+                    return random.choice(legal_moves)
+
+                scored_moves.sort(key=lambda item: item[1], reverse=True)
+                pool = scored_moves[:candidate_limit]
+                return random.choice(pool)[0]
+
+        except Exception:
+            return random.choice(legal_moves)
+
     def make_ai_move(self):
         try:
-            # STEP 1: If playing the 200 Elo bot, implement Martin's handicap logic from chess.com
-            if self.ai_level == 0:
-                legal_moves = list(self.board.legal_moves)
+            target_elo = Bot_ratings.get(self.ai_level, 200)
+            chosen_move = self.choose_elo_move(self.board, target_elo)
 
-                # Spin a roulette wheel (0.0 to 1.0) to decide how the 200 elo handles this turn
-                roll = random.random()
+            if chosen_move is not None:
+                self.execute_bot_move(chosen_move)
+                return
 
-                # 35% Chance: Play a completely random move (Absolute Blunder)
-                if roll < 0.35:
-                    final_move = random.choice(legal_moves)
-                    self.execute_bot_move(final_move)
-                    return
-
-                # 65% Chance: Use Stockfish, but degrade its choice
-                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                    # Ask Stockfish to evaluate the top 5 multi-PV variants at an ultra-low depth
-                    analysis = engine.analyse(self.board, chess.engine.Limit(depth=2), multipv=5)
-
-                    # Extract the moves found by the engine
-                    ranked_moves = [info.get("pv")[0] for info in analysis if info.get("pv")]
-
-                    if ranked_moves:
-                        # 40% Chance: 200 elo bot plays a mediocre, suboptimal move (3rd to 5th choice)
-                        if roll < 0.75 and len(ranked_moves) >= 3:
-                            final_move = random.choice(ranked_moves[2:])
-                            self.execute_bot_move(final_move)
-                        # 25% Chance: 200 elo bot spots a decent move (1st or 2nd choice)
-                        else:
-                            final_move = random.choice(ranked_moves[:2])
-                            self.execute_bot_move(final_move)
-                            return
-
-            elif self.ai_level == 5:
-                legal_moves = list(self.board.legal_moves)
-
-                if random.random() < 0.15:
-                    self.execute_bot_move(random.choice(legal_moves))
-                    return
-
-                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                    if self.ai_level == 5:
-                        skill_level = 0
-                        engine.configure({"Skill Level": skill_level})
-                        engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
-                        self.execute_bot_move(engine_move.move)
-                        return
-
-            else:
-                with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-                    if self.ai_level == 10:
-                        skill_level = 15
-                        engine.configure({"Skill Level": skill_level})
-                        engine_move = engine.play(self.board, chess.engine.Limit(time=0.1))
-                        self.execute_bot_move(engine_move.move)
+            if not self.board.is_game_over():
+                self.execute_bot_move(random.choice(list(self.board.legal_moves)))
 
         except Exception as e:
             print(f"Engine Error: {e}")
-            # Emergency backup: Make a random legal move if the engine fails
             if not self.board.is_game_over():
                 self.execute_bot_move(random.choice(list(self.board.legal_moves)))
 
@@ -548,7 +699,7 @@ class DylanChessProgram:
             message = ("Time's Up!", "Black's time has run out. White wins!")
 
         messagebox.showinfo("Time's Up!", message)
-        self.board = self.board # keep the current board state
+        self.board = self.board  # keep the current board state
         self.create_menu_ui()
 
     def check_end(self):
@@ -559,6 +710,7 @@ class DylanChessProgram:
             if not getattr(self, 'lesson_mode', False):
                 elo_update = self.calculate_new_elo(result_str)
                 self.elo_history.append(self.player_elo)
+                self.save_profile()
                 if self.player_elo >= 1000:
                     self.show_graduation_screen()
 
