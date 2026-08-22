@@ -16,15 +16,16 @@ import csv
 import glob
 import io
 import os
+import time
 
-Square_Size = 60
-Colors = ["#eeeed2", "#769656"]
+SQUARE_SIZE = 60
+COLORS = ["#eeeed2", "#769656"]
 PIECES = {
      'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'P': '♙',
      'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'p': '♟'
     }
-STOCKFISH_PATH = (r"G:\My Drive\Level 3 NCEA\L3DTSD\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe")
-OPENING_FOLDER = (r"G:\My Drive\Level 3 NCEA\L3DTSD\Chess-program")
+STOCKFISH_PATH = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\stockfish-windows-x86-64-avx2-20260821T230608Z-1-001\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe")
+OPENING_FOLDER = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\chess learning website assets\chess openings")
 
 Bot_ratings = {
     0: 200,
@@ -50,12 +51,20 @@ class DylanChessProgram:
         self.history = []  # Stores (FEN, Move)
         self.review_analysis_data = []  # Stores analysis data
         self.selected_square = None
+        self.legal_targets = []
         self.ai_level = 0  # 0=Easy, 1=Med, 2=Hard
         self.review_index = -1
         self.opening_database = self.load_opening_database()
+        self.graduation_shown = False
 
-        self.player_elo = 200  # Starting elo
-        self.elo_history = [200]
+        self.player_elo = 990  # Starting elo
+        self.elo_history = [990]
+        self.white_time = 600.0
+        self.black_time = 600.0
+        self.active_color = chess.WHITE
+        self.clock_running = False
+        self.last_tick = None
+        self.clock_label = None
 
         # Track Lesson Progress
         self.completed_lessons = {
@@ -144,7 +153,7 @@ class DylanChessProgram:
         frame = tk.Frame(self.container, bg="#2c3e50")
         frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        logo_image = Image.open(r"G:\My Drive\Level 3 NCEA\L3DTSD\Chess-program\chess learning website assets\Logo.png")
+        logo_image = Image.open(r"C:\Users\dylan\OneDrive\Desktop\Chess-program\chess learning website assets\Logo.png")
         logo_image = logo_image.resize((325, 175))
         self.logo_tk = ImageTk.PhotoImage(logo_image)  # Stored to self to prevent garbage collection
 
@@ -297,7 +306,78 @@ class DylanChessProgram:
         self.elo_label = tk.Label(self.container, text=f"Your Elo: {round(self.player_elo)}  |  Opponent Elo: {Bot_ratings[self.ai_level]}",
                                   fg="white", bg="#2c3e50", font=("Arial", 14, "bold"))
         self.elo_label.pack(pady=5)
+
+        self.clock_label = tk.Label(self.container, text=self.format_clock(self.white_time, self.black_time),
+                                    fg="#f1c40f", bg="#2c3e50", font=("Arial", 16, "bold"))
+        self.clock_label.pack(pady=5)
+
+        self.start_game_clock()
         self.draw_board()
+
+    def format_clock(self, white_time, black_time):
+        """Format the clock display."""
+        white_mins = int(white_time // 60)
+        white_secs = int(white_time % 60)
+        black_mins = int(black_time // 60)
+        black_secs = int(black_time % 60)
+
+        return(
+            f"White: {white_mins:02d}:{white_secs:02d} " 
+            f"Black: {black_mins:02d}:{black_secs:02d}"
+            )
+
+    def start_game_clock(self):
+        """Start the active players clock."""
+        if self.board.is_game_over():
+            return
+
+        self.clock_running = True
+        self.last_tick = time.monotonic()
+        self.root.after(100, self.tick_clock)
+
+    def tick_clock(self):
+        """reduce the active players remaining time"""
+        if not self.clock_running or self.board.is_game_over():
+            return
+
+        now = time.monotonic()
+        elapsed = now - self.last_tick
+        self.last_tick = now
+
+        if self.active_color == chess.WHITE:
+            self.white_time = max(0.0, self.white_time - elapsed)
+        else:
+            self.black_time = max(0.0, self.black_time - elapsed)
+
+        self.clock_label.config(
+            text=self.format_clock(self.white_time, self.black_time)
+            )
+
+        if self.white_time <= 0 or self.black_time <= 0:
+            self.clock_running = False
+            self.handle_time_out()
+            return
+
+        self.root.after(100, self.tick_clock)
+
+    def pause_game_clock(self):
+        """Pause the game clock."""
+        self.clock_running = False
+
+    def resume_game_clock(self):
+        """Resume the game clock."""
+        if not self.board.is_game_over():
+            self.clock_running = True
+            self.last_tick = time.monotonic()
+            self.root.after(100, self.tick_clock)
+
+    def switch_active_color(self):
+        """Switch the active color after a move."""
+        self.active_color = chess.BLACK if self.active_color == chess.WHITE else chess.WHITE
+        self.last_tick = time.monotonic()
+        self.clock_label.config(
+            text=self.format_clock(self.white_time, self.black_time)
+            )
 
     def draw_board(self, current_board=None):
         if current_board is None:
@@ -306,7 +386,7 @@ class DylanChessProgram:
         for r in range(8):
             for c in range(8):
                 x1, y1, x2, y2 = c*60, r*60, (c+1)*60, (r+1)*60
-                color = Colors[(r+c) % 2]
+                color = COLORS[(r+c) % 2]
 
                 if self.selected_square is not None:
                     if r == 7-chess.square_rank(self.selected_square) and c == chess.square_file(self.selected_square):
@@ -318,6 +398,14 @@ class DylanChessProgram:
                 if piece_position:
                     self.canvas.create_text(x1+30, y1+30, text=PIECES[piece_position.symbol()], font=("Arial", 36))
 
+        if self.selected_square is not None:
+            for target_square in self.legal_targets:
+                col = chess.square_file(target_square)
+                row = 7 - chess.square_rank(target_square)
+                x = col * 60 + 30
+                y = row * 60 + 30
+                self.canvas.create_oval(x - 12, y - 12, x + 12, y + 12, fill="#2ecc71", outline="#27ae60", width=2)
+
     def handle_click(self, event):
         column, row = event.x//60, 7-(event.y//60)
         square = chess.square(column, row)
@@ -327,8 +415,18 @@ class DylanChessProgram:
             piece = self.board.piece_at(square)
             if piece and piece.color == self.board.turn:
                 self.selected_square = square
+                self.legal_targets = [
+                    move.to_square for move in self.board.legal_moves
+                    if move.from_square == square
+                ]
                 self.draw_board()
         else:
+            if square == self.selected_square:
+                self.selected_square = None
+                self.legal_targets = []
+                self.draw_board()
+                return
+
             move = chess.Move(self.selected_square, square)
 
             # Handling promotion
@@ -346,13 +444,21 @@ class DylanChessProgram:
                 self.selected_square = None
                 self.draw_board()
 
+                self.pause_game_clock()
+                self.switch_active_color()
+                self.resume_game_clock()
+
                 if not getattr(self, 'lesson_mode', False):
                     if self.ai_level is not None and not self.board.is_game_over():
                         self.root.after(500, self.make_ai_move)
                     else:
                         self.check_end()
                 else:
-                    self.check_lesson_goal(getattr(self, 'current_lesson_title', ""), start_fen, final_move)
+                    self.check_lesson_goal(
+                        getattr(self, 'current_lesson_title', ""),
+                        start_fen,
+                        final_move
+                        )
 
             else:
                 self.selected_square = None
@@ -425,7 +531,25 @@ class DylanChessProgram:
         self.history.append((self.board.fen(), move))
         self.board.push(move)
         self.draw_board()
+
+        self.pause_game_clock()
+        self.switch_active_color()
+        self.resume_game_clock()
+
         self.check_end()
+
+    def handle_time_out(self):
+        """Handle the situation when a player's time runs out."""
+        if self.active_color == chess.WHITE:
+            result = "0-1"  # Black wins
+            message = ("Time's Up!", "White's time has run out. Black wins!")
+        else:
+            result = "1-0"  # White wins
+            message = ("Time's Up!", "Black's time has run out. White wins!")
+
+        messagebox.showinfo("Time's Up!", message)
+        self.board = self.board # keep the current board state
+        self.create_menu_ui()
 
     def check_end(self):
         if self.board.is_game_over():
@@ -435,6 +559,8 @@ class DylanChessProgram:
             if not getattr(self, 'lesson_mode', False):
                 elo_update = self.calculate_new_elo(result_str)
                 self.elo_history.append(self.player_elo)
+                if self.player_elo >= 1000:
+                    self.show_graduation_screen()
 
             self.create_menu_ui()
 
@@ -462,6 +588,51 @@ class DylanChessProgram:
             self.player_elo = 100
 
         return rating_change
+
+    def show_graduation_screen(self):
+        """Show the graduation celebration once the player reaches 1000 Elo."""
+        if self.graduation_shown:
+            return
+
+        self.graduation_shown = True
+        popup = tk.Toplevel(self.root)
+        popup.title("Graduation! 🎉")
+        popup.geometry("500x260")
+        popup.resizable(False, False)
+        popup.transient(self.root)
+        popup.grab_set()
+
+        tk.Label(
+            popup,
+            text="Congratulations!",
+            fg="#f1c40f",
+            bg="#2c3e50",
+            font=("Arial", 26, "bold")
+        ).pack(pady=(20, 10))
+
+        tk.Label(
+            popup,
+            text="You have graduated from the training program\nwith a rating of 1000 Elo!",
+            fg="white",
+            bg="#2c3e50",
+            font=("Arial", 16),
+            justify="center"
+        ).pack(pady=10)
+
+        tk.Label(
+            popup,
+            text="Your chess journey is off to a strong start.",
+            fg="#1abc9c",
+            bg="#2c3e50",
+            font=("Arial", 12, "italic")
+        ).pack(pady=10)
+
+        tk.Button(
+            popup,
+            text="Return to Menu",
+            width=20,
+            command=lambda: [popup.destroy(), self.create_menu_ui()]
+        ).pack(pady=20)
 
     def run_game_review(self):
         self.clear_screen()
