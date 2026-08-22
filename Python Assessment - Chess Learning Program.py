@@ -583,9 +583,10 @@ class DylanChessProgram:
                 self.selected_square = None
                 self.draw_board()
 
-                self.pause_game_clock()
-                self.switch_active_color()
-                self.resume_game_clock()
+                if not getattr(self, 'lesson_mode', False):
+                    self.pause_game_clock()
+                    self.switch_active_color()
+                    self.resume_game_clock()
 
                 if not getattr(self, 'lesson_mode', False):
                     if self.ai_level is not None and not self.board.is_game_over():

@@ -26,5 +26,17 @@
       "Checks and Captures": false,
       "Checkmates and Stalemates": false
     }
+  },
+  "thesuperpoweredflyingwarthogstyledpigthatcanandwilleatpotatos": {
+    "password": "1",
+    "player_elo": 200,
+    "elo_history": [
+      200
+    ],
+    "completed_lessons": {
+      "Piece Movements": false,
+      "Checks and Captures": false,
+      "Checkmates and Stalemates": false
+    }
   }
 }
