@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import csv
 import glob
+import hashlib
 import io
 import json
 import os
@@ -24,9 +25,20 @@ PIECES = {
      'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'P': '♙',
      'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'p': '♟'
     }
-STOCKFISH_PATH = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\stockfish-windows-x86-64-avx2-20260821T230608Z-1-001\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe")
-OPENING_FOLDER = (r"C:\Users\dylan\OneDrive\Desktop\Chess-program\chess learning website assets\chess openings")
-ACCOUNT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tester_accounts.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STOCKFISH_PATH = os.path.join(
+    BASE_DIR,
+    "stockfish-windows-x86-64-avx2-20260821T230608Z-1-001",
+    "stockfish-windows-x86-64-avx2",
+    "stockfish",
+    "stockfish-windows-x86-64-avx2.exe"
+)
+OPENING_FOLDER = os.path.join(
+    BASE_DIR,
+    "chess learning website assets",
+    "chess openings"
+)
+ACCOUNT_FILE = os.path.join(BASE_DIR, "tester_accounts.json")
 
 Bot_ratings = {
     0: 200,
@@ -59,15 +71,17 @@ class DylanChessProgram:
         self.graduation_shown = False
         self.current_user = None
         self.accounts = self.load_accounts()
+        self.engine_error_shown = False
 
-        self.player_elo = 990  # Starting elo
-        self.elo_history = [990]
+        self.player_elo = 200  # Starting elo
+        self.elo_history = [200]
         self.white_time = 600.0
         self.black_time = 600.0
         self.active_color = chess.WHITE
         self.clock_running = False
         self.last_tick = None
         self.clock_label = None
+        self.clock_job = None
 
         # Track Lesson Progress
         self.completed_lessons = {
@@ -106,7 +120,7 @@ class DylanChessProgram:
             "completed_lessons": {
                 "Piece Movements": False,
                 "Checks and Captures": False,
-                "Checkmates and Stalemates": False
+                "Stalemates": False
             }
         }
 
@@ -119,9 +133,16 @@ class DylanChessProgram:
         self.completed_lessons = {
             "Piece Movements": profile.get("completed_lessons", {}).get("Piece Movements", False),
             "Checks and Captures": profile.get("completed_lessons", {}).get("Checks and Captures", False),
-            "Checkmates and Stalemates": profile.get("completed_lessons", {}).get("Checkmates and Stalemates", False)
+            "Stalemates": (
+                profile.get("completed_lessons", {}).get("Stalemates", False)
+                or profile.get("completed_lessons", {}).get("Checkmates and Stalemates", False)
+            )
         }
         self.graduation_shown = self.player_elo >= 1000
+
+    def hash_password(self, password):
+        """Create a one-way hash for a tester password."""
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
     def save_profile(self):
         """Write the current tester's progress to the account file."""
@@ -170,7 +191,15 @@ class DylanChessProgram:
             messagebox.showerror("Login failed", "No account exists for that tester.")
             return
 
-        if self.accounts[username].get("password") != password:
+        account_password = self.accounts[username].get("password", "")
+        password_matches = account_password == self.hash_password(password)
+
+        if not password_matches and account_password == password:
+            password_matches = True
+            self.accounts[username]["password"] = self.hash_password(password)
+            self.save_accounts()
+
+        if not password_matches:
             messagebox.showerror("Login failed", "Incorrect password.")
             return
 
@@ -195,7 +224,7 @@ class DylanChessProgram:
             return
 
         new_profile = self.get_default_profile()
-        new_profile["password"] = password
+        new_profile["password"] = self.hash_password(password)
         self.accounts[username] = new_profile
         self.save_accounts()
         self.apply_profile_to_session(username)
@@ -272,6 +301,7 @@ class DylanChessProgram:
 
     def create_menu_ui(self):
         """Create the UI for the menu."""
+        self.pause_game_clock()
         self.save_profile()
         self.clear_screen()
         self.review_index = -1
@@ -393,7 +423,9 @@ class DylanChessProgram:
             if captured_piece and captured_piece.piece_type == chess.KNIGHT:
                 passed = True
         elif title == "Stalemates":
-            passed = True
+            temp_board = chess.Board(start_fen)
+            temp_board.push(move)
+            passed = temp_board.is_stalemate()
 
         if passed:
             self.completed_lessons[title] = True
@@ -429,11 +461,20 @@ class DylanChessProgram:
         tk.Button(self.game_settings, text="Player vs AI Level 3(1000 Elo)", width=25, command=lambda: self.start_game(10)).pack(pady=10)
 
     def start_game(self, level, player_color=chess.WHITE):
+        self.pause_game_clock()
         self.board = chess.Board()
         self.game_settings.destroy()
         self.ai_level = level
-        player_color == getattr(self, "player_color", chess.WHITE)
+        self.player_color = player_color
         self.history = []
+        self.selected_square = None
+        self.legal_targets = []
+        self.white_time = 600.0
+        self.black_time = 600.0
+        self.active_color = chess.WHITE
+        self.clock_running = False
+        self.last_tick = None
+        self.clock_job = None
         self.clear_screen()
         self.chess_board_ui()
 
@@ -467,15 +508,16 @@ class DylanChessProgram:
 
     def start_game_clock(self):
         """Start the active players clock."""
-        if self.board.is_game_over():
+        if self.board.is_game_over() or self.clock_label is None or self.clock_job is not None:
             return
 
         self.clock_running = True
         self.last_tick = time.monotonic()
-        self.root.after(100, self.tick_clock)
+        self.clock_job = self.root.after(100, self.tick_clock)
 
     def tick_clock(self):
         """reduce the active players remaining time"""
+        self.clock_job = None
         if not self.clock_running or self.board.is_game_over():
             return
 
@@ -488,35 +530,37 @@ class DylanChessProgram:
         else:
             self.black_time = max(0.0, self.black_time - elapsed)
 
-        self.clock_label.config(
-            text=self.format_clock(self.white_time, self.black_time)
-            )
+        if self.clock_label is None:
+            self.clock_running = False
+            return
+
+        self.clock_label.config(text=self.format_clock(self.white_time, self.black_time))
 
         if self.white_time <= 0 or self.black_time <= 0:
             self.clock_running = False
             self.handle_time_out()
             return
 
-        self.root.after(100, self.tick_clock)
+        self.clock_job = self.root.after(100, self.tick_clock)
 
     def pause_game_clock(self):
         """Pause the game clock."""
         self.clock_running = False
+        if self.clock_job is not None:
+            self.root.after_cancel(self.clock_job)
+            self.clock_job = None
 
     def resume_game_clock(self):
         """Resume the game clock."""
         if not self.board.is_game_over():
-            self.clock_running = True
-            self.last_tick = time.monotonic()
-            self.root.after(100, self.tick_clock)
+            self.start_game_clock()
 
     def switch_active_color(self):
         """Switch the active color after a move."""
         self.active_color = chess.BLACK if self.active_color == chess.WHITE else chess.WHITE
         self.last_tick = time.monotonic()
-        self.clock_label.config(
-            text=self.format_clock(self.white_time, self.black_time)
-            )
+        if self.clock_label is not None:
+            self.clock_label.config(text=self.format_clock(self.white_time, self.black_time))
 
     def draw_board(self, current_board=None):
         if current_board is None:
@@ -660,6 +704,12 @@ class DylanChessProgram:
                 return random.choice(pool)[0]
 
         except Exception:
+            if not self.engine_error_shown:
+                messagebox.showwarning(
+                    "Stockfish unavailable",
+                    "Stockfish could not be started. A random legal move will be used."
+                )
+                self.engine_error_shown = True
             return random.choice(legal_moves)
 
     def make_ai_move(self):
@@ -700,7 +750,10 @@ class DylanChessProgram:
             message = ("Time's Up!", "Black's time has run out. White wins!")
 
         messagebox.showinfo("Time's Up!", message)
-        self.board = self.board  # keep the current board state
+        if not getattr(self, 'lesson_mode', False):
+            self.calculate_new_elo(result)
+            self.elo_history.append(self.player_elo)
+            self.save_profile()
         self.create_menu_ui()
 
     def check_end(self):
