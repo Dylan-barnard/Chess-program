@@ -39,6 +39,7 @@ OPENING_FOLDER = os.path.join(
     "chess openings"
 )
 ACCOUNT_FILE = os.path.join(BASE_DIR, "tester_accounts.json")
+MIN_PASSWORD_LENGTH = 6
 
 Bot_ratings = {
     0: 200,
@@ -222,6 +223,15 @@ class DylanChessProgram:
         if not password:
             messagebox.showerror("Account failed", "Please enter a password.")
             return
+
+        if len(password) < MIN_PASSWORD_LENGTH:
+            messagebox.showerror(
+                "Account failed",
+                f"Password must be at least "
+                f"{MIN_PASSWORD_LENGTH} characters long."
+            )
+            return
+        return
 
         new_profile = self.get_default_profile()
         new_profile["password"] = self.hash_password(password)
@@ -439,19 +449,24 @@ class DylanChessProgram:
             captured_piece = temp_board.piece_at(move.to_square)
 
             # The required move must capture the knight on c3.
-            passed = (move.to_square == chess.C3
-                      and captured_piece is not None
-                      and captured_piece.piece_type == chess.KNIGHT)
+            passed = (
+                move.to_square == chess.C3
+                and captured_piece is not None
+                and captured_piece.piece_type == chess.KNIGHT
+            )
 
             if not passed:
-                # Reset the position if this method is called with an incorrect move.
+                # Reset the position if this method is called with an
+                # incorrect move.
                 self.board = chess.Board(start_fen)
                 self.selected_square = None
                 self.legal_targets = []
                 self.draw_board()
 
-                messagebox.showinfo("Try again", "You must capture the knight on c3 to complete this lesson.")
-
+                messagebox.showinfo(
+                    "Try again",
+                    "You must capture the knight on c3 to complete this lesson.",
+                )
                 return
 
         elif title == "Stalemates":
@@ -462,11 +477,14 @@ class DylanChessProgram:
         if passed:
             self.completed_lessons[title] = True
             self.save_profile()
-            messagebox.showinfo("Success", f"Lesson '{title}' completed!")
+            messagebox.showinfo(
+                "Success",
+                f"Lesson '{title}' completed!",
+            )
             self.show_lesson_menu()
 
     def show_performance_graph(self, parent_frame):
-        figure, ax=plt.subplots(figsize=(4, 2), dpi=100)
+        figure, ax = plt.subplots(figsize=(4, 2), dpi=100)
         figure.patch.set_facecolor('#2c3e50')
         ax.patch.set_facecolor('#34495e')
 
@@ -659,21 +677,30 @@ class DylanChessProgram:
                 final_move = promotion
 
             if final_move:
-                # Validate the Checks and Captures lesson before changing the board or switching the turn.
-                if (getattr(self, "lesson_mode", False) and getattr(self, "current_lesson_title", "") == "Checks and Captures"):
+                # Validate the Checks and Captures lesson before changing
+                # the board or switching the turn.
+                if (
+                    getattr(self, "lesson_mode", False)
+                    and getattr(self, "current_lesson_title", "")
+                    == "Checks and Captures"
+                ):
                     captured_piece = self.board.piece_at(final_move.to_square)
 
-                    correct_capture = (final_move.to_square == chess.C3
-                                       and captured_piece is not None
-                                       and captured_piece.piece_type == chess.KNIGHT)
+                    correct_capture = (
+                        final_move.to_square == chess.C3
+                        and captured_piece is not None
+                        and captured_piece.piece_type == chess.KNIGHT
+                    )
 
                     if not correct_capture:
                         self.selected_square = None
                         self.legal_targets = []
                         self.draw_board()
 
-                        messagebox.showinfo("Try again", "That move is not part of this lesson. Capture the knight on c3.")
-
+                        messagebox.showinfo(
+                            "Try again",
+                            "That move is not part of this lesson. Capture the knight on c3.",
+                        )
                         return
 
                 start_fen = self.board.fen()
