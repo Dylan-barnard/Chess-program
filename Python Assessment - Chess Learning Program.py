@@ -398,30 +398,62 @@ class DylanChessProgram:
 
     def show_lesson_hint(self):
         """Show a hint to complete the lesson."""
+
         target_square = None
+
         if self.current_lesson_title == "Checks and Captures":
             target_square = chess.C3
+
         elif self.current_lesson_title == "Stalemates":
             target_square = chess.C7
 
         if target_square is not None:
-            c = chess.square_file(target_square)
-            r = 7 - chess.square_rank(target_square)
-            self.canvas.create_rectangle(c*60, r*60, (c+1)*60, (r+1)*60, outline="#e74c3c", width=5)
+            # Redraw the board first so old hints are removed.
+            self.draw_board()
+
+            column = chess.square_file(target_square)
+            row = 7 - chess.square_rank(target_square)
+
+            # The empty fill keeps the chessboard visible.
+            self.canvas.create_rectangle(column * 60, row * 60,
+                                         (column + 1) * 60,
+                                         (row + 1) * 60,
+                                         outline="#e74c3c", width=3)
+
             messagebox.showinfo("Hint!", "Focus on the highlighted square.")
+
         else:
             messagebox.showinfo("Hint!", "Move to any legal square to complete this lesson.")
 
     def check_lesson_goal(self, title, start_fen, move):
+        """Check whether the required lesson objective was completed."""
+
         passed = False
+
         if title == "Piece Movements":
+            # Any legal move completes this lesson.
             passed = True
+
         elif title == "Checks and Captures":
             temp_board = chess.Board(start_fen)
             captured_piece = temp_board.piece_at(move.to_square)
 
-            if captured_piece and captured_piece.piece_type == chess.KNIGHT:
-                passed = True
+            # The required move must capture the knight on c3.
+            passed = (move.to_square == chess.C3
+                      and captured_piece is not None
+                      and captured_piece.piece_type == chess.KNIGHT)
+
+            if not passed:
+                # Reset the position if this method is called with an incorrect move.
+                self.board = chess.Board(start_fen)
+                self.selected_square = None
+                self.legal_targets = []
+                self.draw_board()
+
+                messagebox.showinfo("Try again", "You must capture the knight on c3 to complete this lesson.")
+
+                return
+
         elif title == "Stalemates":
             temp_board = chess.Board(start_fen)
             temp_board.push(move)
@@ -430,7 +462,7 @@ class DylanChessProgram:
         if passed:
             self.completed_lessons[title] = True
             self.save_profile()
-            messagebox.showinfo("Success", f"Lesson'{title}' completed!")
+            messagebox.showinfo("Success", f"Lesson '{title}' completed!")
             self.show_lesson_menu()
 
     def show_performance_graph(self, parent_frame):
@@ -590,20 +622,25 @@ class DylanChessProgram:
                 self.canvas.create_oval(x - 12, y - 12, x + 12, y + 12, fill="#2ecc71", outline="#27ae60", width=2)
 
     def handle_click(self, event):
-        column, row = event.x//60, 7-(event.y//60)
+        """Handle selecting and moving chess pieces on the board."""
+
+        column = event.x // 60
+        row = 7 - (event.y // 60)
         square = chess.square(column, row)
+
         final_move = None
 
         if self.selected_square is None:
             piece = self.board.piece_at(square)
+
             if piece and piece.color == self.board.turn:
                 self.selected_square = square
-                self.legal_targets = [
-                    move.to_square for move in self.board.legal_moves
-                    if move.from_square == square
-                ]
+
+                self.legal_targets = [move.to_square for move in self.board.legal_moves if move.from_square == square]
                 self.draw_board()
+
         else:
+            # Clicking the selected piece again cancels the selection.
             if square == self.selected_square:
                 self.selected_square = None
                 self.legal_targets = []
@@ -612,40 +649,61 @@ class DylanChessProgram:
 
             move = chess.Move(self.selected_square, square)
 
-            # Handling promotion
+            # Automatically promote pawns to queens.
             promotion = chess.Move(self.selected_square, square, chess.QUEEN)
 
             if move in self.board.legal_moves:
                 final_move = move
+
             elif promotion in self.board.legal_moves:
                 final_move = promotion
 
             if final_move:
+                # Validate the Checks and Captures lesson before changing the board or switching the turn.
+                if (getattr(self, "lesson_mode", False) and getattr(self, "current_lesson_title", "") == "Checks and Captures"):
+                    captured_piece = self.board.piece_at(final_move.to_square)
+
+                    correct_capture = (final_move.to_square == chess.C3
+                                       and captured_piece is not None
+                                       and captured_piece.piece_type == chess.KNIGHT)
+
+                    if not correct_capture:
+                        self.selected_square = None
+                        self.legal_targets = []
+                        self.draw_board()
+
+                        messagebox.showinfo("Try again", "That move is not part of this lesson. Capture the knight on c3.")
+
+                        return
+
                 start_fen = self.board.fen()
+
                 self.history.append((start_fen, final_move))
                 self.board.push(final_move)
+
                 self.selected_square = None
+                self.legal_targets = []
+
                 self.draw_board()
 
-                if not getattr(self, 'lesson_mode', False):
+                if not getattr(self, "lesson_mode", False):
                     self.pause_game_clock()
                     self.switch_active_color()
                     self.resume_game_clock()
 
-                if not getattr(self, 'lesson_mode', False):
-                    if self.ai_level is not None and not self.board.is_game_over():
+                if not getattr(self, "lesson_mode", False):
+                    if (self.ai_level is not None and not self.board.is_game_over()):
                         self.root.after(500, self.make_ai_move)
                     else:
                         self.check_end()
+
                 else:
-                    self.check_lesson_goal(
-                        getattr(self, 'current_lesson_title', ""),
-                        start_fen,
-                        final_move
-                        )
+                    self.check_lesson_goal(getattr(self, "current_lesson_title", ""), start_fen, final_move)
 
             else:
+                # The selected move was illegal.
                 self.selected_square = None
+                self.legal_targets = []
                 self.draw_board()
 
     def choose_elo_move(self, board, target_elo):
