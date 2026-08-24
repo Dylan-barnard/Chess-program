@@ -231,7 +231,6 @@ class DylanChessProgram:
                 f"{MIN_PASSWORD_LENGTH} characters long."
             )
             return
-        return
 
         new_profile = self.get_default_profile()
         new_profile["password"] = self.hash_password(password)
